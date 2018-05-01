@@ -1,3 +1,12 @@
 credit instruction:
 
 https://learn.adafruit.com/crack-the-code?view=all
+
+Bluetooth chip used: HM-10 module
+
+wireing:  TX - RX
+          RX - TX
+
+
+Iphone end: only receiving part is implemeneted in code, trasmitting part can be easily added according to the instruction above.
+Arudino end: both receiving and transmitting parts are added.
