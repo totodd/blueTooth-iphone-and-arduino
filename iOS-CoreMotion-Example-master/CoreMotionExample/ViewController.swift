@@ -12,6 +12,7 @@ import CoreMotion
 import CoreBluetooth
 
 class ViewController: UIViewController {
+    
 
 	let motionManager = CMMotionManager()
 	var timer: Timer!
@@ -19,15 +20,24 @@ class ViewController: UIViewController {
     var magnetometerDataG: CMMagnetometerData!
     var accelerometerDataG: CMAccelerometerData!
     var state: Int = 0
-    
+
     // Bluetooth
+    
+    let chipName = "TOTO-BL"
+    let characteristicName = CBUUID(string:"FFE1")
+    let targetCBUUID = CBUUID(string: "FFE0")
+
+    var txCharacteristic : CBCharacteristic?
+    var rxCharacteristic : CBCharacteristic?
+    var characteristicASCIIValue = NSString()
+    
     var centralManager: CBCentralManager!
     var targetPeripheral : CBPeripheral!
     var bluezList: Set<String>!
     var targetCharacteristic: CBUUID!
-    let targetCBUUID = CBUUID(string: "FFE0")
     var blePeripheral : CBPeripheral!
-
+    
+    var targetService: CBService!
 	
     @IBOutlet weak var id: UILabel!
     @IBOutlet weak var barHeight: NSLayoutConstraint!
@@ -146,12 +156,12 @@ extension ViewController: CBCentralManagerDelegate{
     }
     
     
-    
+    // discovered peripheral
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
         blePeripheral = peripheral
         blePeripheral.delegate = self
         print(blePeripheral)
-        if(blePeripheral?.name == "BT05"){
+        if(blePeripheral?.name == chipName){
             centralManager.connect(blePeripheral)
             centralManager.stopScan()
 
@@ -159,11 +169,14 @@ extension ViewController: CBCentralManagerDelegate{
         
     }
     
+    // connected peripheral
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         print("Connected!")
         print(peripheral)
 
         //    let ttargetCBUUID = CBUUID(string: "FFE0")
+        peripheral.delegate = self
+
         blePeripheral.discoverServices(nil)
         //    targetPeripheral.discoverServices([targetCBUUID])
         //    targetPeripheral.discoverServices([ttargetCBUUID])
@@ -171,37 +184,110 @@ extension ViewController: CBCentralManagerDelegate{
     }
     
 }
-
+    // discovered services
 extension ViewController: CBPeripheralDelegate{
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard let services = peripheral.services else { return }
-        print("************** services ******************")
+        print("****************************************** services ********************************")
+        print("Found \(services.count) services!")
 
         for service in services {
             print(service.uuid)
             print(service.uuid.uuidString)
-            //      if(service.uuid.uuidString == "180F"){
-            print(service)
-            peripheral.discoverCharacteristics(nil, for: service)
-            //      }
+            if(service.uuid == targetCBUUID){
+                peripheral.discoverCharacteristics(nil, for: service)
+            }
         }
     }
+    
+    // discovered charactreristic
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        guard let characteristics = service.characteristics else { return }
-        print("************** characteristics ******************")
-
+        print("*******************************************************")
+        
+        if ((error) != nil) {
+            print("Error discovering services: \(error!.localizedDescription)")
+            return
+        }
+        
+        guard let characteristics = service.characteristics else {
+            return
+        }
+        
+        print("Found \(characteristics.count) characteristics!")
+        
         for characteristic in characteristics {
+            //looks for the right characteristic
+            print(characteristic.uuid)
             print(characteristic)
-            print(characteristic.uuid.uuidString)
-            
-            if(characteristic.properties.contains(.read)){
-                print("\(characteristic.uuid):properties contains .read")
+
+            if characteristic.uuid.isEqual(characteristicName)  {
+                print("characteristic id matched")
+                rxCharacteristic = characteristic
+
+                //Once found, subscribe to the this particular characteristic...
+                peripheral.setNotifyValue(true, for: rxCharacteristic!)
+                // We can return after calling CBPeripheral.setNotifyValue because CBPeripheralDelegate's
+                // didUpdateNotificationStateForCharacteristic method will be called automatically
                 peripheral.readValue(for: characteristic)
+                print("Rx Characteristic: \(characteristic.uuid)")
             }
-            if(characteristic.properties.contains(.notify)){
-                print("\(characteristic.uuid):properties contains .notify")
-                peripheral.setNotifyValue(true, for: characteristic)
+//            if characteristic.uuid.isEqual(targetCharacteristic){
+//                txCharacteristic = characteristic
+//                print("Tx Characteristic: \(characteristic.uuid)")
+//            }
+            peripheral.discoverDescriptors(for: characteristic)
+        }
+    }
+    
+    // Getting Values From Characteristic
+    
+    /*After you've found a characteristic of a service that you are interested in, you can read the characteristic's value by calling the peripheral "readValueForCharacteristic" method within the "didDiscoverCharacteristicsFor service" delegate.
+     */
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        
+        if characteristic == rxCharacteristic {
+            if let ASCIIstring = NSString(data: characteristic.value!, encoding: String.Encoding.utf8.rawValue) {
+                characteristicASCIIValue = ASCIIstring
+                print("Value Recieved: \((characteristicASCIIValue as String))")
+                displayNum.text = characteristicASCIIValue as String
+                NotificationCenter.default.post(name:NSNotification.Name(rawValue: "Notify"), object: nil)
+                
             }
         }
     }
+    
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverDescriptorsFor characteristic: CBCharacteristic, error: Error?) {
+        print("*******************************************************")
+        
+        if error != nil {
+            print("\(error.debugDescription)")
+            return
+        }
+        if ((characteristic.descriptors) != nil) {
+            
+            for x in characteristic.descriptors!{
+                let descript = x as CBDescriptor!
+                print("function name: DidDiscoverDescriptorForChar \(String(describing: descript?.description))")
+                print("Rx Value \(String(describing: rxCharacteristic?.value))")
+                print("Tx Value \(String(describing: txCharacteristic?.value))")
+            }
+        }
+    }
+    
+    func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
+        print("*******************************************************")
+        
+        if (error != nil) {
+            print("Error changing notification state:\(String(describing: error?.localizedDescription))")
+            
+        } else {
+            print("Characteristic's value subscribed")
+        }
+        
+        if (characteristic.isNotifying) {
+            print ("Subscribed. Notification has begun for: \(characteristic.uuid)")
+        }
+    }
+    
 }
+
